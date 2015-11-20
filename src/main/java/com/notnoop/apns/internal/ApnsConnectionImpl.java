@@ -155,58 +155,58 @@ public class ApnsConnectionImpl implements ApnsConnection {
                         // Quickly close socket, so we won't ever try to send push notifications
                         // using the defective socket.
                         Utilities.close(socket);
-
-                        int command = bytes[0] & 0xFF;
-                        if (command != 8) {
-                            throw new IOException("Unexpected command byte " + command);
-                        }
-                        int statusCode = bytes[1] & 0xFF;
-                        DeliveryError e = DeliveryError.ofCode(statusCode);
-
-                        int id = Utilities.parseBytes(bytes[2], bytes[3], bytes[4], bytes[5]);
-
-                        logger.debug("Closed connection cause={}; id={}", e, id);
-                        delegate.connectionClosed(e, id);
-
-                        Queue<ApnsNotification> tempCache = new LinkedList<ApnsNotification>();
-                        ApnsNotification notification = null;
-                        boolean foundNotification = false;
-
-                        while (!cachedNotifications.isEmpty()) {
-                            notification = cachedNotifications.poll();
-                            logger.debug("Candidate for removal, message id {}", notification.getIdentifier());
-
-                            if (notification.getIdentifier() == id) {
-                                logger.debug("Bad message found {}", notification.getIdentifier());
-                                foundNotification = true;
-                                break;
-                            }
-                            tempCache.add(notification);
-                        }
-
-                        if (foundNotification) {
-                            logger.debug("delegate.messageSendFailed, message id {}", notification.getIdentifier());
-                            delegate.messageSendFailed(notification, new ApnsDeliveryErrorException(e));
-                        } else {
-                            cachedNotifications.addAll(tempCache);
-                            int resendSize = tempCache.size();
-                            logger.warn("Received error for message that wasn't in the cache...");
-                            if (autoAdjustCacheLength) {
-                                cacheLength = cacheLength + (resendSize / 2);
-                                delegate.cacheLengthExceeded(cacheLength);
-                            }
-                            logger.debug("delegate.messageSendFailed, unknown id");
-                            delegate.messageSendFailed(null, new ApnsDeliveryErrorException(e));
-                        }
-
                         int resendSize = 0;
+                        synchronized (this) {
+                            int command = bytes[0] & 0xFF;
+                            if (command != 8) {
+                                throw new IOException("Unexpected command byte " + command);
+                            }
+                            int statusCode = bytes[1] & 0xFF;
+                            DeliveryError e = DeliveryError.ofCode(statusCode);
 
-                        while (!cachedNotifications.isEmpty()) {
+                            int id = Utilities.parseBytes(bytes[2], bytes[3], bytes[4], bytes[5]);
 
-                            resendSize++;
-                            final ApnsNotification resendNotification = cachedNotifications.poll();
-                            logger.debug("Queuing for resend {}", resendNotification.getIdentifier());
-                            notificationsBuffer.add(resendNotification);
+                            logger.debug("Closed connection cause={}; id={}", e, id);
+                            delegate.connectionClosed(e, id);
+
+                            Queue<ApnsNotification> tempCache = new LinkedList<ApnsNotification>();
+                            ApnsNotification notification = null;
+                            boolean foundNotification = false;
+
+                            while (!cachedNotifications.isEmpty()) {
+                                notification = cachedNotifications.poll();
+                                logger.debug("Candidate for removal, message id {}", notification.getIdentifier());
+
+                                if (notification.getIdentifier() == id) {
+                                    logger.debug("Bad message found {}", notification.getIdentifier());
+                                    foundNotification = true;
+                                    break;
+                                }
+                                tempCache.add(notification);
+                            }
+
+                            if (foundNotification) {
+                                logger.debug("delegate.messageSendFailed, message id {}", notification.getIdentifier());
+                                delegate.messageSendFailed(notification, new ApnsDeliveryErrorException(e));
+                            } else {
+                                cachedNotifications.addAll(tempCache);
+                                resendSize = tempCache.size();
+                                logger.warn("Received error for message that wasn't in the cache...");
+                                if (autoAdjustCacheLength) {
+                                    cacheLength = cacheLength + (resendSize / 2);
+                                    delegate.cacheLengthExceeded(cacheLength);
+                                }
+                                logger.debug("delegate.messageSendFailed, unknown id");
+                                delegate.messageSendFailed(null, new ApnsDeliveryErrorException(e));
+                            }
+
+                            while (!cachedNotifications.isEmpty()) {
+
+                                resendSize++;
+                                final ApnsNotification resendNotification = cachedNotifications.poll();
+                                logger.debug("Queuing for resend {}", resendNotification.getIdentifier());
+                                notificationsBuffer.add(resendNotification);
+                            }
                         }
                         logger.debug("resending {} notifications", resendSize);
                         delegate.notificationsResent(resendSize);
