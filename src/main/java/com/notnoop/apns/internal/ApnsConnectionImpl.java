@@ -154,9 +154,8 @@ public class ApnsConnectionImpl implements ApnsConnection {
                         logger.debug("Error-response packet {}", Utilities.encodeHex(bytes));
                         // Quickly close socket, so we won't ever try to send push notifications
                         // using the defective socket.
-                        Utilities.close(socket);
-                        int resendSize = 0;
                         synchronized (this) {
+                            Utilities.close(socket);
                             int command = bytes[0] & 0xFF;
                             if (command != 8) {
                                 throw new IOException("Unexpected command byte " + command);
@@ -190,7 +189,7 @@ public class ApnsConnectionImpl implements ApnsConnection {
                                 delegate.messageSendFailed(notification, new ApnsDeliveryErrorException(e));
                             } else {
                                 cachedNotifications.addAll(tempCache);
-                                resendSize = tempCache.size();
+                                int resendSize = tempCache.size();
                                 logger.warn("Received error for message that wasn't in the cache...");
                                 if (autoAdjustCacheLength) {
                                     cacheLength = cacheLength + (resendSize / 2);
@@ -199,7 +198,7 @@ public class ApnsConnectionImpl implements ApnsConnection {
                                 logger.debug("delegate.messageSendFailed, unknown id");
                                 delegate.messageSendFailed(null, new ApnsDeliveryErrorException(e));
                             }
-
+                            int resendSize = 0;
                             while (!cachedNotifications.isEmpty()) {
 
                                 resendSize++;
@@ -207,9 +206,9 @@ public class ApnsConnectionImpl implements ApnsConnection {
                                 logger.debug("Queuing for resend {}", resendNotification.getIdentifier());
                                 notificationsBuffer.add(resendNotification);
                             }
+                            logger.debug("resending {} notifications", resendSize);
+                            delegate.notificationsResent(resendSize);
                         }
-                        logger.debug("resending {} notifications", resendSize);
-                        delegate.notificationsResent(resendSize);
                     }
                     logger.debug("Monitoring input stream closed by EOF");
 
